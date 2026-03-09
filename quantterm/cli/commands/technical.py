@@ -13,7 +13,7 @@ from quantterm.analytics.technical.indicators import (
     roc, mfi, keltner_channels, donchian_channels, ichimoku
 )
 from quantterm.data.providers import yahoo as yahoo_provider
-from quantterm.cli.main import SuppressStderr
+from quantterm.cli.utils import SuppressStderr
 
 app = typer.Typer(help="Technical analysis commands")
 console = Console()

@@ -5,19 +5,11 @@ import typer
 from rich.console import Console
 from rich.theme import Theme
 
+# Import utilities
+from quantterm.cli.utils import SuppressStderr
+
 # Suppress all warnings for cleaner output
 warnings.filterwarnings('ignore')
-
-# Also suppress warnings from yfinance by redirecting stderr temporarily
-class SuppressStderr:
-    def __enter__(self):
-        self._stderr = sys.stderr
-        devnull = 'NUL' if sys.platform == 'win32' else '/dev/null'
-        sys.stderr = open(devnull, 'w')
-        return self
-    def __exit__(self, *args):
-        sys.stderr.close()
-        sys.stderr = self._stderr
 
 from quantterm import __version__
 
