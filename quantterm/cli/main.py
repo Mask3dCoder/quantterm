@@ -1,6 +1,5 @@
 """QuantTerm CLI main application."""
 import warnings
-import sys
 import typer
 from rich.console import Console
 from rich.theme import Theme
