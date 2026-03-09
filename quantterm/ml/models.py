@@ -12,8 +12,13 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 import joblib
 
-
-class MLModelTrainer:
+# SECURITY: Import safe loading functions
+from quantterm.utils.security import (
+    safe_joblib_load,
+    safe_joblib_dump,
+    SecurityError,
+    InvalidModelError,
+)
     """
     Train ML models with proper time-series cross-validation.
     
@@ -211,8 +216,16 @@ class MLModelTrainer:
         return float(prob), float(confidence)
     
     def save(self, path: str):
-        """Save model to file."""
-        joblib.dump({
+        """Save model to file with security validation.
+        
+        Args:
+            path: Path to save the model
+            
+        Raises:
+            SecurityError: If model type is not allowed
+        """
+        # Validate before saving
+        safe_joblib_dump({
             'model': self.model,
             'scaler': self.scaler,
             'feature_names': self.feature_names,
@@ -220,8 +233,23 @@ class MLModelTrainer:
         }, path)
     
     def load(self, path: str):
-        """Load model from file."""
-        data = joblib.load(path)
+        """Load model from file with security validation.
+        
+        This method implements multiple security checks:
+        1. File validation (magic number, size, suspicious content)
+        2. Restricted unpickling (class whitelist)
+        3. Type verification after loading
+        
+        Args:
+            path: Path to the model file
+            
+        Raises:
+            SecurityError: If model file is suspicious or contains disallowed classes
+            InvalidModelError: If model file is corrupted or invalid
+        """
+        # Use safe loading with full validation
+        data = safe_joblib_load(path)
+        
         self.model = data['model']
         self.scaler = data['scaler']
         self.feature_names = data['feature_names']

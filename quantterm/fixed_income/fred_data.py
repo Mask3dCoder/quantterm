@@ -4,10 +4,43 @@ Federal Reserve Economic Data (FRED) integration.
 Free, institutional-quality economic data for fixed income analytics.
 """
 import os
+import time
+import logging
+import re
 from datetime import date
 from typing import Optional
 import pandas as pd
 import requests
+
+# Configure secure logging
+logger = logging.getLogger(__name__)
+
+# Rate limiting: FRED allows 120 requests per minute
+_last_request_time = 0
+_min_request_interval = 0.5  # 500ms between requests
+
+def _rate_limit():
+    """Apply rate limiting to API requests."""
+    global _last_request_time
+    elapsed = time.time() - _last_request_time
+    if elapsed < _min_request_interval:
+        time.sleep(_min_request_interval - elapsed)
+    _last_request_time = time.time()
+
+
+def _sanitize_url(url: str, params: dict = None) -> str:
+    """
+    Sanitize URL for logging - remove sensitive parameters.
+    """
+    if not params:
+        return url
+    safe_params = params.copy()
+    if 'api_key' in safe_params:
+        safe_params['api_key'] = '***REDACTED***'
+    if safe_params:
+        param_str = '&'.join(f"{k}={v}" for k, v in safe_params.items())
+        return f"{url}?{param_str}"
+    return url
 
 
 class FREDDataProvider:
@@ -43,8 +76,63 @@ class FREDDataProvider:
         
         Args:
             api_key: FRED API key (get free at https://fred.stlouisfed.org/docs/api/api_key.html)
+                      If not provided, retrieves from secure storage or environment.
         """
-        self.api_key = api_key or os.getenv("FRED_API_KEY")
+        # Try provided key first
+        self.api_key = api_key
+        
+        # If not provided, try secure storage
+        if not self.api_key:
+            try:
+                from quantterm.security import get_secrets_manager
+                manager = get_secrets_manager()
+                self.api_key = manager.get_api_key('fred')
+            except Exception:
+                pass
+        
+        # Fallback to environment
+        if not self.api_key:
+            self.api_key = os.getenv("QUANTTERM_FRED") or os.getenv("FRED_API_KEY")
+    
+    def _make_request(self, url: str, params: dict) -> Optional[dict]:
+        """
+        Make API request with security measures.
+        
+        Security features:
+        - Rate limiting
+        - URL sanitization in logs
+        - Error handling without exposing keys
+        
+        Args:
+            url: API endpoint URL
+            params: Query parameters (including api_key)
+            
+        Returns:
+            Response JSON or None on error
+        """
+        # Apply rate limiting
+        _rate_limit()
+        
+        # Log request with sanitized URL
+        logger.debug(f"FRED request: {_sanitize_url(url, params)}")
+        
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            
+            # Log response status (not the content)
+            logger.debug(f"FRED response status: {response.status_code}")
+            
+            # Check for errors
+            response.raise_for_status()
+            
+            return response.json()
+            
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"FRED HTTP error: {e.response.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"FRED request failed: {e}")
+        
+        return None
     
     def get_treasury_yield(self, tenor: str, target_date: date) -> Optional[float]:
         """
@@ -72,19 +160,16 @@ class FREDDataProvider:
                 'file_type': 'json'
             }
             
-            try:
-                response = requests.get(url, params=params, timeout=10)
-                data = response.json()
-                
-                if 'observations' in data and data['observations']:
-                    value = data['observations'][0]['value']
-                    if value == '.':
-                        return None
-                    return float(value) / 100  # Convert from percent
-            except Exception as e:
-                print(f"FRED API error: {e}")
+            data = self._make_request(url, params)
+            
+            if data and 'observations' in data and data['observations']:
+                value = data['observations'][0]['value']
+                if value == '.':
+                    return None
+                return float(value) / 100  # Convert from percent
         
         # Fallback: return cached/mock data if no API key
+        logger.info("Using fallback yield data (no API key configured)")
         return self._get_fallback_yield(tenor, target_date)
     
     def get_treasury_curve(self, target_date: date) -> dict:
@@ -129,21 +214,17 @@ class FREDDataProvider:
                 'file_type': 'json'
             }
             
-            try:
-                response = requests.get(url, params=params, timeout=10)
-                data = response.json()
+            data = self._make_request(url, params)
+            
+            if data and 'observations' in data:
+                values = {}
+                for obs in data['observations']:
+                    d = pd.to_datetime(obs['date'])
+                    v = obs['value']
+                    if v != '.':
+                        values[d] = float(v) / 100
                 
-                if 'observations' in data:
-                    values = {}
-                    for obs in data['observations']:
-                        d = pd.to_datetime(obs['date'])
-                        v = obs['value']
-                        if v != '.':
-                            values[d] = float(v) / 100
-                    
-                    return pd.Series(values)
-            except Exception as e:
-                print(f"FRED API error: {e}")
+                return pd.Series(values)
         
         # Fallback
         return pd.Series(dtype=float)

@@ -1,8 +1,12 @@
-"""Configuration settings for QuantTerm."""
+"""Configuration settings for QuantTerm.
+
+SECURITY: API keys are retrieved on-demand from secure storage.
+Use 'quantterm config set-key' to configure API keys.
+"""
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,7 +30,20 @@ class Settings(BaseSettings):
     cache_dir: Path = Field(default=Path.home() / ".quantterm" / "cache")
     log_dir: Path = Field(default=Path.home() / ".quantterm" / "logs")
 
-    # Data Providers API Keys (optional)
+    # API Keys - These are deprecated in favor of secure storage
+    # Use 'quantterm config set-key <provider>' to configure
+    # These are kept for backward compatibility only
+    _deprecated_keys = {
+        'bloomberg_api_key': 'bloomberg',
+        'refinitiv_api_key': 'refinitiv',
+        'polygon_api_key': 'polygon',
+        'alpaca_key': 'alpaca_key',
+        'alpaca_secret': 'alpaca_secret',
+        'fred_api_key': 'fred',
+    }
+    
+    # These fields are kept for .env file backward compatibility
+    # but will show a deprecation warning
     bloomberg_api_key: Optional[str] = None
     refinitiv_api_key: Optional[str] = None
     polygon_api_key: Optional[str] = None
@@ -56,6 +73,66 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"
+    
+    def get_api_key(self, provider: str) -> Optional[str]:
+        """
+        Get API key for a provider from secure storage.
+        
+        This method retrieves API keys from secure storage (keyring),
+        falling back to environment variables or deprecated .env values.
+        
+        Args:
+            provider: Provider name (e.g., 'fred', 'polygon')
+            
+        Returns:
+            API key string or None if not configured
+        """
+        # Try secure storage first
+        try:
+            from quantterm.security import get_secrets_manager
+            manager = get_secrets_manager()
+            key = manager.get_api_key(provider)
+            if key:
+                return key
+        except Exception:
+            pass
+        
+        # Fallback to environment variables
+        import os
+        env_key = f"QUANTTERM_{provider.upper()}"
+        env_value = os.environ.get(env_key)
+        if env_value:
+            return env_value
+        
+        # Fallback to deprecated .env values (with warning)
+        deprecated_map = {
+            'bloomberg': 'bloomberg_api_key',
+            'refinitiv': 'refinitiv_api_key',
+            'polygon': 'polygon_api_key',
+            'alpaca_key': 'alpaca_key',
+            'alpaca_secret': 'alpaca_secret',
+            'fred': 'fred_api_key',
+        }
+        
+        if provider in deprecated_map:
+            attr = deprecated_map[provider]
+            value = getattr(self, attr, None)
+            if value:
+                import warnings
+                warnings.warn(
+                    f"API key for {provider} is stored in plain text. "
+                    f"Use 'quantterm config set-key {provider}' to migrate to secure storage.",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                return value
+        
+        return None
+    
+    def __repr__(self) -> str:
+        """Never expose API keys in repr."""
+        # Return a safe representation without keys
+        return "<Settings (api_keys_hidden)>"
 
 
 # Global settings instance

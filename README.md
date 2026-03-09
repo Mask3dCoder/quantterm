@@ -173,6 +173,26 @@ quantterm backtest run \
   --end 2023-12-31
 ```
 
+### Windows Users
+
+If `quantterm` command is not found after installation on Windows:
+
+1. **Use python -m** (recommended):
+   ```powershell
+   python -m quantterm quote AAPL
+   ```
+
+2. **Restart your terminal** and try again
+
+3. **Use wrapper scripts** (included in `scripts/`):
+   ```powershell
+   .\scripts\quantterm.bat quote AAPL
+   # Or in PowerShell:
+   .\scripts\quantterm.ps1 quote AAPL
+   ```
+
+For detailed Windows installation instructions, see [docs/installation/windows.md](docs/installation/windows.md).
+
 ### Optimize a Strategy
 
 ```bash

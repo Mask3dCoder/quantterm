@@ -17,6 +17,17 @@ from quantterm.utils.telemetry import (
     setup_logging,
     logger
 )
+from quantterm.utils.security import (
+    SecurityError,
+    InvalidModelError,
+    safe_joblib_load,
+    safe_joblib_dump,
+    validate_model_file,
+    validate_ticker,
+    validate_portfolio_weights,
+    is_allowed_class,
+    ALLOWED_SKLEARN_CLASSES,
+)
 
 __all__ = [
     # Resilience
@@ -35,4 +46,14 @@ __all__ = [
     'instrumented',
     'setup_logging',
     'logger',
+    # Security
+    'SecurityError',
+    'InvalidModelError',
+    'safe_joblib_load',
+    'safe_joblib_dump',
+    'validate_model_file',
+    'validate_ticker',
+    'validate_portfolio_weights',
+    'is_allowed_class',
+    'ALLOWED_SKLEARN_CLASSES',
 ]

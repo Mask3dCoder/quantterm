@@ -2,6 +2,7 @@
 
 Provides a simple interface to download OHLCV data for backtesting.
 Supports both single and multi-symbol data retrieval.
+Includes caching for improved performance and offline usage.
 """
 
 from datetime import datetime
@@ -10,19 +11,32 @@ from typing import Optional, Dict
 import pandas as pd
 import yfinance as yf
 
+from quantterm.data.cache import get_cache
+
 
 class DataHandler:
     """Yahoo Finance data handler for backtesting.
 
     Fetches historical OHLCV data using yfinance library.
     Uses adjusted prices to account for corporate actions.
+    Supports caching for improved performance.
     """
+
+    def __init__(self, use_cache: bool = True):
+        """Initialize the data handler.
+        
+        Args:
+            use_cache: Whether to use caching. Defaults to True.
+        """
+        self._use_cache = use_cache
+        self._cache = get_cache() if use_cache else None
 
     def get_bars(
         self,
         symbol: str,
         start: str,
         end: str,
+        use_cache: bool = True,
     ) -> pd.DataFrame:
         """Get OHLCV bars from Yahoo Finance.
 
@@ -30,6 +44,7 @@ class DataHandler:
             symbol: Ticker symbol (e.g., 'SPY', 'AAPL').
             start: Start date in 'YYYY-MM-DD' format.
             end: End date in 'YYYY-MM-DD' format.
+            use_cache: Whether to use cache for this request.
 
         Returns:
             DataFrame with columns: timestamp, open, high, low, close, volume.
@@ -38,6 +53,13 @@ class DataHandler:
         Raises:
             ValueError: If no data is returned from Yahoo Finance.
         """
+        # Check cache first
+        cache = get_cache() if use_cache else None
+        if cache:
+            cached_data = cache.get(symbol, start, end, interval="1d", provider="yfinance")
+            if cached_data is not None:
+                return cached_data
+        
         # Download data from Yahoo Finance with auto_adjust=True
         # to use adjusted close prices
         df = yf.download(
@@ -71,6 +93,10 @@ class DataHandler:
         df = df[["timestamp", "Open", "High", "Low", "Close", "Volume"]]
         df = df.rename(columns={"Volume": "volume"})
         
+        # Store in cache
+        if cache is not None:
+            cache.set(symbol, start, end, df, interval="1d", provider="yfinance")
+        
         return df
 
     def get_latest_price(self, symbol: str) -> Optional[float]:
@@ -97,17 +123,25 @@ class MultiSymbolDataHandler:
     
     Provides methods for loading multi-symbol data, finding common trading
     days, and handling missing data (halts, suspensions).
+    Supports caching for improved performance.
     """
     
-    def __init__(self):
-        """Initialize the multi-symbol data handler."""
-        self._cache: Dict[str, pd.DataFrame] = {}
+    def __init__(self, use_cache: bool = True):
+        """Initialize the multi-symbol data handler.
+        
+        Args:
+            use_cache: Whether to use caching. Defaults to True.
+        """
+        self._use_cache = use_cache
+        self._cache = get_cache() if use_cache else None
+        self._memory_cache: Dict[str, pd.DataFrame] = {}
     
     def get_bars(
         self, 
         symbols: list[str], 
         start: str, 
-        end: str
+        end: str,
+        use_cache: bool = True,
     ) -> Dict[str, pd.DataFrame]:
         """Load data for multiple symbols.
         
@@ -115,14 +149,31 @@ class MultiSymbolDataHandler:
             symbols: List of ticker symbols.
             start: Start date (YYYY-MM-DD).
             end: End date (YYYY-MM-DD).
+            use_cache: Whether to use cache.
             
         Returns:
             Dict mapping symbol to OHLCV DataFrame.
         """
+        cache = get_cache() if use_cache else None
         result = {}
+        
         for symbol in symbols:
+            # Check memory cache first
+            cache_key = f"{symbol}_{start}_{end}"
+            if cache_key in self._memory_cache:
+                result[symbol] = self._memory_cache[cache_key]
+                continue
+            
+            # Check persistent cache
+            if cache:
+                cached_data = cache.get(symbol, start, end, interval="1d", provider="yfinance")
+                if cached_data is not None:
+                    self._memory_cache[cache_key] = cached_data
+                    result[symbol] = cached_data
+                    continue
+            
+            # Download from Yahoo Finance
             try:
-                # Download data from Yahoo Finance using yf.download
                 df = yf.download(
                     symbol, 
                     start=start, 
@@ -133,11 +184,16 @@ class MultiSymbolDataHandler:
                 if df is not None and not df.empty:
                     # Handle MultiIndex columns from yfinance
                     if isinstance(df.columns, pd.MultiIndex):
-                        # Flatten the MultiIndex columns
                         df.columns = df.columns.get_level_values(0)
                     # Select and rename columns
                     df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
                     df = df.rename(columns={'Volume': 'volume'})
+                    
+                    # Store in caches
+                    self._memory_cache[cache_key] = df
+                    if cache:
+                        cache.set(symbol, start, end, df, interval="1d", provider="yfinance")
+                    
                     result[symbol] = df
             except Exception:
                 # Skip symbols that fail to download
@@ -226,20 +282,24 @@ class IntradayDataHandler:
     - Market hours filtering (9:30-16:00 ET)
     - Pre/post market handling
     - Gap detection (trading halts)
+    - Caching for improved performance
     """
     
     VALID_INTERVALS = ('1m', '5m', '15m', '1h', '1d')
     
-    def __init__(self, interval: str = '5m'):
+    def __init__(self, interval: str = '5m', use_cache: bool = True):
         """Initialize with timeframe.
         
         Args:
             interval: Yahoo Finance interval (1m, 5m, 15m, 1h, 1d)
+            use_cache: Whether to use caching. Defaults to True.
         """
         if interval not in self.VALID_INTERVALS:
             raise ValueError(f"Invalid interval: {interval}. Valid: {self.VALID_INTERVALS}")
         self.interval = interval
-        self._cache: Dict[str, pd.DataFrame] = {}
+        self._use_cache = use_cache
+        self._cache = get_cache() if use_cache else None
+        self._memory_cache: Dict[str, pd.DataFrame] = {}
     
     def get_bars(
         self,
@@ -263,6 +323,13 @@ class IntradayDataHandler:
         
         intvl = interval or self.interval
         
+        # Check cache first
+        cache = get_cache() if self._use_cache else None
+        if cache:
+            cached_data = cache.get(symbol, start, end, interval=intvl, provider="yfinance")
+            if cached_data is not None:
+                return cached_data
+        
         # yfinance uses different format for intraday
         df = yf.download(
             symbol,
@@ -278,6 +345,10 @@ class IntradayDataHandler:
         # Handle MultiIndex columns (yfinance quirk)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        
+        # Store in cache
+        if cache is not None:
+            cache.set(symbol, start, end, df, interval=intvl, provider="yfinance")
         
         return df
     

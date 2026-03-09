@@ -7,8 +7,27 @@ Welcome to QuantTerm! We're excited to have you contribute to the open-source Bl
 1. **Fork** the repository
 2. **Clone** your fork: `git clone https://github.com/YOUR_USERNAME/quantterm.git`
 3. **Create** a virtual environment: `python -m venv venv && source venv/bin/activate`
+   - On Windows: `python -m venv venv && venv\Scripts\activate`
 4. **Install** dependencies: `poetry install`
 5. **Create** a branch: `git checkout -b feature/your-feature-name`
+
+## Windows Development
+
+On Windows, you can test QuantTerm using multiple methods:
+
+```powershell
+# Method 1: Using python -m (recommended)
+python -m quantterm quote AAPL
+
+# Method 2: Using the wrapper script
+.\scripts\quantterm.bat quote AAPL
+
+# Method 3: After pip install -e
+pip install -e .
+quantterm quote AAPL  # May require terminal restart
+```
+
+**Important**: Test your changes with both `python -m quantterm` and `quantterm` invocation methods.
 
 ## Development Workflow
 
